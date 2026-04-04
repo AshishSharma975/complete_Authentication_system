@@ -1,22 +1,22 @@
 import mongoose from "mongoose";
 
-
 const sessionSchema = new mongoose.Schema({
     user: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "yt-user"
+        ref: "yt-user",
+        required: true
     },
-    refreshToken: {
+    refreshTokenHash: {  
         type: String,
-        required: [true, "refresh token is required"]
+        required: true
     },
     ip: {
         type: String,
-        required: [true, "ip is required"]
+        required: true
     },
     userAgent: {
         type: String,
-        required: [true, "user agent is required"]
+        required: true
     },
     revoked: {
         type: Boolean,
@@ -24,8 +24,8 @@ const sessionSchema = new mongoose.Schema({
     }
 }, {
     timestamps: true
-})
+});
 
-const sessionModel = mongoose.model("yt-session", sessionSchema)
+const sessionModel = mongoose.model("yt-session", sessionSchema);
 
-export default sessionModel
+export default sessionModel;

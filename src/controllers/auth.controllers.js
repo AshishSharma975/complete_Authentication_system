@@ -83,34 +83,31 @@ export async function loginController(req, res) {
             { expiresIn: "7d" }
         );
 
-        const refreshTokenHash = await bcrypt.hash(refreshToken,10)
+        const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
 
         const session = await sessionModel.create({
-    user: user._id,
-    refreshTokenHash: refreshTokenHash,   
-    ip: req.ip,
-    userAgent: req.headers["user-agent"]
-})
+            user: user._id,
+            refreshTokenHash,
+            ip: req.ip,
+            userAgent: req.headers["user-agent"]
+        });
 
         const accessToken = jwt.sign(
-    { id: user._id, sessionId: session._id },
-    config.JWT_SECRET_KEY,
-    { expiresIn: "15m" }
-);
+            { id: user._id, sessionId: session._id },
+            config.JWT_SECRET_KEY,
+            { expiresIn: "15m" }
+        );
 
-
-        res.cookie("refreshToken",refreshToken,{
-            httpOnly:true,
-            secure:false,
-            sameSite:"strict",
-            maxAge:7*24*60*60*1000
-        })
-
+        res.cookie("refreshToken", refreshToken, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000
+        });
 
         return res.status(200).json({
             message: "User logged in successfully",
-            accessToken,
-            refreshToken
+            accessToken
         });
 
     } catch (error) {
@@ -159,35 +156,151 @@ export async function getMe(req, res) {
 }
 
 
-export async function refreshTokenController(req,res) {
-    const refreshToken = req.cookies.refreshToken;
+export async function refreshTokenController(req, res) {
+    try {
+        const refreshToken = req.cookies.refreshToken;
 
-    if(!refreshToken){
+        if (!refreshToken) {
+            return res.status(401).json({
+                message: "Refresh token not found"
+            });
+        }
+
+        const decoded = jwt.verify(refreshToken, config.JWT_SECRET_KEY);
+
+        const sessions = await sessionModel.find({
+            user: decoded.id,
+            revoked: false
+        });
+
+        let validSession = null;
+
+        for (let session of sessions) {
+            const isMatch = await bcrypt.compare(
+                refreshToken,
+                session.refreshTokenHash
+            );
+
+            if (isMatch) {
+                validSession = session;
+                break;
+            }
+        }
+
+        if (!validSession) {
+            return res.status(403).json({
+                message: "Invalid refresh token"
+            });
+        }
+
+        // generate new tokens
+        const newRefreshToken = jwt.sign(
+            { id: decoded.id },
+            config.JWT_SECRET_KEY,
+            { expiresIn: "7d" }
+        );
+
+        const newHash = await bcrypt.hash(newRefreshToken, 10);
+
+        validSession.refreshTokenHash = newHash;
+        await validSession.save();
+
+        const accessToken = jwt.sign(
+            { id: decoded.id, sessionId: validSession._id },
+            config.JWT_SECRET_KEY,
+            { expiresIn: "15m" }
+        );
+
+        res.cookie("refreshToken", newRefreshToken, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000
+        });
+
+        return res.status(200).json({
+            message: "Token refreshed",
+            accessToken
+        });
+
+    } catch (error) {
         return res.status(401).json({
-            message:"refresh token not found"
-        })
+            message: "Invalid token"
+        });
     }
+}
 
-    const decoded = jwt.verify(refreshToken,config.JWT_SECRET_KEY)
 
-    const accessToken = jwt.sign({
-        id:decoded.id
-    },config.JWT_SECRET_KEY,{expiresIn:"15m"})
+export async function logoutController(req, res) {
+    try {
+        const refreshToken = req.cookies.refreshToken;
 
-    const newRefreshToken = jwt.sign({
-        id:decoded.id
-    },config.JWT_SECRET_KEY,{expiresIn:"7d"})
+        if (!refreshToken) {
+            return res.status(401).json({
+                message: "Refresh token not found"
+            });
+        }
 
-    res.cookie("refreshToken",newRefreshToken,{
-        httpOnly:true,
-        secure:true,
-        sameSite:"strict",
-        maxAge:7*24*60*60*1000
-    })
-    return res.status(200).json({
-        message:"user refreshed successfully",
-        accessToken,
-        newRefreshToken
-    })
-    
+        const decoded = jwt.verify(refreshToken, config.JWT_SECRET_KEY);
+
+        const sessions = await sessionModel.find({
+            user: decoded.id,
+            revoked: false
+        });
+
+        for (let session of sessions) {
+            const isMatch = await bcrypt.compare(
+                refreshToken,
+                session.refreshTokenHash
+            );
+
+            if (isMatch) {
+                session.revoked = true;
+                await session.save();
+                break;
+            }
+        }
+
+        res.clearCookie("refreshToken");
+
+        return res.status(200).json({
+            message: "Logged out successfully"
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Server error"
+        });
+    }
+}
+
+
+export async function logoutAllController(req, res) {
+    try {
+        const refreshToken = req.cookies.refreshToken;
+
+        if (!refreshToken) {
+            return res.status(400).json({
+                message: "Refresh token not found."
+            });
+        }
+
+        const decoded = jwt.verify(refreshToken, config.JWT_SECRET_KEY);
+
+        await sessionModel.updateMany(
+            { user: decoded.id },
+            { revoked: true }
+        );
+
+        res.clearCookie("refreshToken");
+
+        return res.status(200).json({
+            message: "Logged out from all devices"
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Server error"
+        });
+    }
 }
