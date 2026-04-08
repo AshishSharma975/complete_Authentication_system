@@ -119,7 +119,6 @@ export async function loginController(req, res) {
 }
 
 
-
 export async function getMe(req, res) {
     try {
         const token = req.headers.authorization?.split(" ")[1];
