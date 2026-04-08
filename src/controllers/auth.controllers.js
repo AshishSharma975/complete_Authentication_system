@@ -3,7 +3,9 @@ import userModel from "../models/user.model.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import sessionModel from "../models/session.model.js";
-
+import sendEmail from "../services/email.service.js";
+import { generateOTP, getOTPHtml } from "../utils/utils.js";
+import otpModel from "../models/otp.model.js";
 
 export async function registerController(req, res) {
     try {
@@ -33,12 +35,26 @@ export async function registerController(req, res) {
             password: hash
         });
 
+
+        const otp = generateOTP();
+        const html = getOTPHtml(otp);
+
+        const otpHash = await bcrypt.hash(otp, 10);
+
+        await otpModel.create({
+            email,
+            user: user._id,
+            otpHash,
+            expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+        });
+
+        await sendEmail(email, "Verify your email", "", html);
         return res.status(201).json({
             message: "User registered successfully",
-            user: {
-                id: user._id,
-                username: user.username,
-                email: user.email
+            user:{
+                username:user.username,
+                email:user.email,
+                verified:user.verified
             }
         });
 
@@ -66,6 +82,12 @@ export async function loginController(req, res) {
         if (!user) {
             return res.status(404).json({
                 message: "User not found"
+            });
+        }
+
+        if(!user.verified){
+            return res.status(403).json({
+                message: "email not verified"
             });
         }
 
@@ -295,6 +317,55 @@ export async function logoutAllController(req, res) {
 
         return res.status(200).json({
             message: "Logged out from all devices"
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Server error"
+        });
+    }
+}
+
+
+export async function verifyEmailController(req, res) {
+    try {
+        const { otp, email } = req.body;
+
+        const otpDoc = await otpModel.findOne({
+            email,
+            expiresAt: { $gt: new Date() }
+        }).sort({ createdAt: -1 });
+
+        if (!otpDoc) {
+            return res.status(400).json({
+                message: "Invalid or expired OTP"
+            });
+        }
+
+        const isMatch = await bcrypt.compare(otp, otpDoc.otpHash);
+
+        if (!isMatch) {
+            return res.status(400).json({
+                message: "Invalid OTP"
+            });
+        }
+
+        await userModel.findByIdAndUpdate(
+            otpDoc.user,
+            { verified: true }
+        );
+
+        await otpModel.deleteMany({
+            user: otpDoc.user
+        });
+
+        return res.status(200).json({
+            message: "Email verified successfully",
+            user:{
+                username:user.username,
+                email:user.email,
+                verified:user.verified
+            }
         });
 
     } catch (error) {

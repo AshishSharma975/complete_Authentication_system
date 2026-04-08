@@ -20,6 +20,7 @@ const userSchema = new mongoose.Schema({
         default:false
     },
     
+    
 })
 
 const userModel = mongoose.model("yt-user", userSchema)
